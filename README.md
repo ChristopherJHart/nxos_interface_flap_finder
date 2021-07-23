@@ -81,3 +81,13 @@ In the context of network operations, a "flap" is when a network entity is in a 
 > "The OSPF adjacency between the two routers was continuously **flapping**, causing instability in the network as IPv4 prefixes were rapidly inserted and removed from unicast routing tables."
 
 > "One of the DWDM service provider's optical devices encountered hardware failure, degrading the signal in the circuit and causing the interface of our switch to **flap**. This disrupted network connectivity between sites."
+
+### How do you measure a flap?
+
+This script identifies an interface flap according to syslog similar to the following:
+
+> 2012 Jun 22 16:52:08 switch %ETHPORT-5-IF_DOWN_LINK_FAILURE: Interface Ethernet1/1 is down (Link failure)
+
+Every "ETHPORT-5-IF_DOWN_LINK_FAILURE" syslog counts as a flap for the relevant interface that transitioned to a down state. Obviously, if an interface transitions from an "up" state to a "down" state, but never comes back up, that does not fit the definition of a flap; strictly speaking, a flap requires an up-down-up cycle, not just an up-down cycle.
+
+For that reason, the `--interface-flap-floor` parameter can be used with this script to fine-tune the threshold between normal behavior and abnormal flapping behavior. The default value for this parameter is 5.
