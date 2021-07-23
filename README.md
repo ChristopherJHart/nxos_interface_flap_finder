@@ -5,14 +5,14 @@ This script connects to one or more Cisco Nexus switches running NX-OS software,
 ```
 $ python nxos_interface_flap_finder.py 192.0.2.10 192.0.2.20 --interface-flap-floor 1
 Input password for user account admin: 
-+----------------+----------------------------+-------------+-----------------+
-| IP             | Hostname                   | Interface   | Number of Flaps |
-+----------------+----------------------------+-------------+-----------------+
-| 192.0.2.10     | F340.23.09-N5K-C56128P-1   | Ethernet1/3 |        2        |
-| 192.0.2.20     | F340.23.11-N5K-C56128P-0A7 | Ethernet1/1 |        1        |
-| 192.0.2.20     | F340.23.11-N5K-C56128P-0A7 | Ethernet1/3 |        1        |
-| 192.0.2.20     | F340.23.11-N5K-C56128P-0A7 | Ethernet1/5 |        1        |
-+----------------+----------------------------+-------------+-----------------+
++----------------+---------------+-------------+-----------------+
+| IP             | Hostname      | Interface   | Number of Flaps |
++----------------+---------------+-------------+-----------------+
+| 192.0.2.10     | N5K-C56128P-1 | Ethernet1/3 |        2        |
+| 192.0.2.20     | N5K-C56128P-2 | Ethernet1/1 |        1        |
+| 192.0.2.20     | N5K-C56128P-2 | Ethernet1/3 |        1        |
+| 192.0.2.20     | N5K-C56128P-2 | Ethernet1/5 |        1        |
++----------------+---------------+-------------+-----------------+
 ```
 
 This script can be used as a stop-gap measure in place of a more comprehensive syslog aggregation solution. Long-term, users should consider implementing a more robust syslog solution, such as ELK (Elasticsearch, Logstash, and Kibana), Graylog, or Splunk.
