@@ -1,2 +1,4 @@
 venv/
 .vscode/
+inventory/defaults.yaml
+inventory/hosts.yaml
