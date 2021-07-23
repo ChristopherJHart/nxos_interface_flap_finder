@@ -302,7 +302,7 @@ async def main() -> None:
             # Iterate through our interface data, sorting it from highest number of flaps to lowest
             # number of flaps.
             for d in sorted(data, key=lambda i: i["flaps"], reverse=True):
-                if d["flaps"] > args.interface_flap_floor:
+                if d["flaps"] >= args.interface_flap_floor:
                     table.add_row(d.values())
             print(table)
     logger.info("Finished analysis in %.2f seconds", time.time() - start_time)
