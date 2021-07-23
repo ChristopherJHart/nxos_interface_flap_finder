@@ -45,7 +45,6 @@ jobs:
       - name: Lint with flake8
         run: >
           flake8 ./nxos_interface_flap_finder.py
-          --check
           --max-line-length=100
           --docstring-convention=google
   lint-yaml:
