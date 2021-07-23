@@ -39,9 +39,8 @@ __license__ = """
 ################################################################################
 """
 
-LINK_FLAP_PATTERN = re.compile(
-    r"^(?P<datetime>\d+\s+\S+\s+\d+\s+\d+:\d+:\d+)\s+(\S+)\s+%ETHPORT-5-IF_DOWN_LINK_FAILURE:\s+Interface\s+(?P<interface>\S+)\s+is\s+down\s+\(Link\s+failure\)"  # noqa: E501
-)
+INTERFACE_NAME_PATTERN = re.compile(r"^(?P<interface>\S+)\s+is\s+")
+INTERFACE_RESET_PATTERN = re.compile(r"^\s+(?P<flaps>\d+)\s+interface\s+resets")
 
 
 parser = argparse.ArgumentParser(
@@ -195,17 +194,54 @@ async def validate_connections(
     return connections
 
 
-async def analyze_syslog_for_interface_flaps(syslog: str) -> List[dict]:
-    """Analyze syslog output for interface flaps.
+async def analyze_interfaces_for_flaps(interface_data: str) -> List[dict]:
+    """Analyze interface information for flaps.
 
-    Iterates through the output of "show logging logfile" from a Nexus switch and identifies syslogs
-    that indicate an interface flapped. A flap is identified through a syslog similar to the
-    following:
+    Iterates through the output of "show interface" from a Nexus switch and identifies interface
+    reset counters that indicate an interface has flapped. An example of this is shown below:
 
-    2012 Jun 22 16:52:08 switch %ETHPORT-5-IF_DOWN_LINK_FAILURE: Interface Ethernet1/3 is down (Link failure)  # noqa: E501
+    switch# show interface
+    <snip>
+    Ethernet1/1 is up
+     Dedicated Interface
+
+      Hardware: 1000/10000 Ethernet, address: 00de.fb61.4468 (bia 00de.fb61.4468)
+      MTU 1500 bytes,  BW 10000000 Kbit, DLY 10 usec
+      reliability 255/255, txload 1/255, rxload 1/255
+      Encapsulation ARPA, medium is broadcast
+      Port mode is access
+      full-duplex, 10 Gb/s, media type is 10G
+      Beacon is turned off
+      Input flow-control is off, output flow-control is off
+      Rate mode is dedicated
+      Switchport monitor is off
+      EtherType is 0x8100
+      Last link flapped 05:46:22
+      Last clearing of "show interface" counters never
+      1 interface resets    <<<
+      30 seconds input rate 344 bits/sec, 0 packets/sec
+      30 seconds output rate 72 bits/sec, 0 packets/sec
+      Load-Interval #2: 5 minute (300 seconds)
+        input rate 200 bps, 0 pps; output rate 136 bps, 0 pps
+      RX
+        0 unicast packets  11444 multicast packets  0 broadcast packets
+        11444 input packets  1031554 bytes
+        0 jumbo packets  0 storm suppression bytes
+        0 runts  0 giants  0 CRC  0 no buffer
+        0 input error  0 short frame  0 overrun   0 underrun  0 ignored
+        0 watchdog  0 bad etype drop  0 bad proto drop  0 if down drop
+        0 input with dribble  0 input discard
+        0 Rx pause
+      TX
+        0 unicast packets  1055 multicast packets  0 broadcast packets
+        1055 output packets  364652 bytes
+        0 jumbo packets
+        0 output error  0 collision  0 deferred  0 late collision
+        0 lost carrier  0 no carrier  0 babble 0 output discard
+        0 Tx pause
 
     Args:
-        syslog (str): The output of "show logging logfile" from a Nexus switch.
+        interface_data (str): The output of "show interface" from a Nexus switch.
 
     Returns:
         List[dict]: List of dictionaries representing flapped interfaces on this switch. Sample
@@ -217,15 +253,17 @@ async def analyze_syslog_for_interface_flaps(syslog: str) -> List[dict]:
             {"Ethernet1/3": 8}
         ]
     """
-    logger.debug("%s entries in syslog", syslog.splitlines())
     interfaces = {}
-    for line in syslog.splitlines():
-        if res := LINK_FLAP_PATTERN.search(line):
-            interface = res.groupdict()["interface"]
-            try:
-                interfaces[interface] += 1
-            except KeyError:
-                interfaces[interface] = 1
+    current_interface = None
+    for line in interface_data.splitlines():
+        if name_res := INTERFACE_NAME_PATTERN.search(line):
+            current_interface = name_res.groupdict()["interface"]
+            logger.debug("Found interface %s", current_interface)
+        if reset_res := INTERFACE_RESET_PATTERN.search(line):
+            flaps = int(reset_res.groupdict()["flaps"])
+            logger.debug("Found flaps %s for interface %s", flaps, current_interface)
+            interfaces[current_interface] = flaps
+            current_interface = None
     return interfaces
 
 
@@ -250,10 +288,11 @@ async def get_interface_flaps(conn: AsyncNXOSDriver) -> List[dict]:
             {"ip": "192.0.2.10", "hostname": "N9K-1", "interface": "Ethernet1/3", "flaps": 8}
         ]
     """
-    response = await conn.send_command("show logging logfile")
+    # response = await conn.send_command("show logging logfile")
+    response = await conn.send_command("show interface")
     response.raise_for_status()
     output = response.result
-    interfaces = await analyze_syslog_for_interface_flaps(output)
+    interfaces = await analyze_interfaces_for_flaps(output)
     prompt = await conn.get_prompt()
     data = []
     for interface_name, flap_count in interfaces.items():

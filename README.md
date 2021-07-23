@@ -84,10 +84,48 @@ In the context of network operations, a "flap" is when a network entity is in a 
 
 ### How do you measure a flap?
 
-This script identifies an interface flap according to syslog similar to the following:
+This script associates interface flaps with the "interface resets" counter present in a Nexus switch's interface statistics. An example of this can be found in the `show interface` command, as shown below.
 
-> 2012 Jun 22 16:52:08 switch %ETHPORT-5-IF_DOWN_LINK_FAILURE: Interface Ethernet1/1 is down (Link failure)
+```
+switch# show interface
+<snip>
+Ethernet1/1 is up
+ Dedicated Interface 
 
-Every "ETHPORT-5-IF_DOWN_LINK_FAILURE" syslog counts as a flap for the relevant interface that transitioned to a down state. Obviously, if an interface transitions from an "up" state to a "down" state, but never comes back up, that does not fit the definition of a flap; strictly speaking, a flap requires an up-down-up cycle, not just an up-down cycle.
+  Hardware: 1000/10000 Ethernet, address: 00de.fb61.4468 (bia 00de.fb61.4468)
+  MTU 1500 bytes,  BW 10000000 Kbit, DLY 10 usec
+  reliability 255/255, txload 1/255, rxload 1/255
+  Encapsulation ARPA, medium is broadcast
+  Port mode is access
+  full-duplex, 10 Gb/s, media type is 10G
+  Beacon is turned off
+  Input flow-control is off, output flow-control is off
+  Rate mode is dedicated
+  Switchport monitor is off 
+  EtherType is 0x8100 
+  Last link flapped 05:46:22
+  Last clearing of "show interface" counters never
+  1 interface resets    <<<
+  30 seconds input rate 344 bits/sec, 0 packets/sec
+  30 seconds output rate 72 bits/sec, 0 packets/sec
+  Load-Interval #2: 5 minute (300 seconds)
+    input rate 200 bps, 0 pps; output rate 136 bps, 0 pps
+  RX
+    0 unicast packets  11444 multicast packets  0 broadcast packets
+    11444 input packets  1031554 bytes
+    0 jumbo packets  0 storm suppression bytes
+    0 runts  0 giants  0 CRC  0 no buffer
+    0 input error  0 short frame  0 overrun   0 underrun  0 ignored
+    0 watchdog  0 bad etype drop  0 bad proto drop  0 if down drop
+    0 input with dribble  0 input discard
+    0 Rx pause
+  TX
+    0 unicast packets  1055 multicast packets  0 broadcast packets
+    1055 output packets  364652 bytes
+    0 jumbo packets
+    0 output error  0 collision  0 deferred  0 late collision
+    0 lost carrier  0 no carrier  0 babble 0 output discard
+    0 Tx pause
+```
 
-For that reason, the `--interface-flap-floor` parameter can be used with this script to fine-tune the threshold between normal behavior and abnormal flapping behavior. The default value for this parameter is 5.
+Every network environment is different. Some networks may expect hundreds or thousands of flaps on a regular basis on specific interfaces. For this reason, the `--interface-flap-floor` parameter can be used with this script to fine-tune the threshold between normal behavior and abnormal flapping behavior. The default value for this parameter is 5.
