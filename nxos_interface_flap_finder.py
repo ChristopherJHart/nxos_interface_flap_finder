@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Identifies and reports regularly-flapping interfaces on multiple Nexus switches."""
 
-from typing import List
+from typing import List, Union
 import time
 import argparse
 import logging
@@ -91,6 +91,13 @@ parser.add_argument(
     "--connect-only",
     "-c",
     help="Only connect to devices, do not execute commands.",
+    action="store_true",
+    default=False,
+)
+parser.add_argument(
+    "--include-metadata",
+    "-m",
+    help="Add switch metadata to output.",
     action="store_true",
     default=False,
 )
@@ -194,6 +201,29 @@ async def validate_connections(
     return connections
 
 
+async def command(
+    conn: AsyncNXOSDriver, command: str, structured: bool = False
+) -> Union[str, dict]:
+    """Get normal or TextFSM structured output of show command from switch.
+
+    Args:
+        conn (AsyncNXOSDriver): Scrapli driver representing the connection to the Nexus switch.
+        command (str): Command to execute on switch.
+        structured (bool): Indicates whether TextFSM structured output of command should be
+            returned switch or not.
+
+    Returns:
+        Union[str, dict]: The output of `command` executed on the switch using `conn`. If
+        `structured` is True, then TextFSM structured output of the command is returned. If
+        `structured` is False, then the raw string output of the command is returned.
+    """
+    response = await conn.send_command(command)
+    response.raise_for_status()
+    if structured:
+        return response.textfsm_parse_output()
+    return response.result
+
+
 async def analyze_interfaces_for_flaps(interface_data: str) -> List[dict]:
     """Analyze interface information for flaps.
 
@@ -272,7 +302,7 @@ async def get_interface_flaps(conn: AsyncNXOSDriver) -> List[dict]:
 
     Fetches the output of "show logging logfile" from a Nexus switch and passes it into
     analyze_syslog_for_interface_flaps() for analysis. The results from this coroutine are modified
-    such that the switch's IP and hostname (per CLI prompt) are associated with each interface and
+    such that the switch's IP and switchname (per CLI prompt) are associated with each interface and
     its quantity of flaps.
 
     Args:
@@ -280,31 +310,113 @@ async def get_interface_flaps(conn: AsyncNXOSDriver) -> List[dict]:
 
     Returns:
         List[dict]: List of dictionaries representing each unique (device, interface, number of
-        flaps) tuple. Sample output is as follows:
+        flaps) tuple. Sample output if the "--include-metadata" parameter is not provided is as
+        follows:
 
         [
-            {"ip": "192.0.2.10", "hostname": "N9K-1", "interface": "Ethernet1/1", "flaps": 1},
-            {"ip": "192.0.2.10", "hostname": "N9K-1", "interface": "Ethernet1/2", "flaps": 5},
-            {"ip": "192.0.2.10", "hostname": "N9K-1", "interface": "Ethernet1/3", "flaps": 8}
+            {"ip": "192.0.2.10", "switchname": "N9K-1", "interface": "Ethernet1/1", "flaps": 1},
+            {"ip": "192.0.2.10", "switchname": "N9K-1", "interface": "Ethernet1/2", "flaps": 5},
+            {"ip": "192.0.2.10", "switchname": "N9K-1", "interface": "Ethernet1/3", "flaps": 8}
+        ]
+
+        Sample output if the "--include-metadata" parameter is provided is as follows:
+
+        [
+            {
+                "ip": "192.0.2.10",
+                "switchname": "N9K-1",
+                "software_version": "9.3(7a)",
+                "uptime": "7 day(s), 21 hour(s), 3 minute(s), 47 second(s)",
+                "serial_number": "FOC1234ABCD",
+                "hardware_model": "N9K-C93180YC-FX3",
+                "interface": "Ethernet1/1",
+                "flaps": 1
+            },
+            {
+                "ip": "192.0.2.10",
+                "switchname": "N9K-1",
+                "software_version": "9.3(7a)",
+                "uptime": "7 day(s), 21 hour(s), 3 minute(s), 48 second(s)",
+                "serial_number": "FOC1234ABCD",
+                "hardware_model": "N9K-C93180YC-FX3",
+                "interface": "Ethernet1/2",
+                "flaps": 5
+            },
+            {
+                "ip": "192.0.2.10",
+                "switchname": "N9K-1",
+                "software_version": "9.3(7a)",
+                "uptime": "7 day(s), 21 hour(s), 3 minute(s), 49 second(s)",
+                "serial_number": "FOC1234ABCD",
+                "hardware_model": "N9K-C93180YC-FX3",
+                "interface": "Ethernet1/3",
+                "flaps": 8
+            }
         ]
     """
-    # response = await conn.send_command("show logging logfile")
-    response = await conn.send_command("show interface")
-    response.raise_for_status()
-    output = response.result
+    # We can't use a TextFSM template here, as there is not a "show interface" template that
+    # includes the interface reset counter.
+    output = await command(conn, "show interface")
     interfaces = await analyze_interfaces_for_flaps(output)
-    prompt = await conn.get_prompt()
     data = []
     for interface_name, flap_count in interfaces.items():
         if flap_count:
-            data.append(
-                {
-                    "ip": conn.host,
-                    "hostname": prompt.replace("#", ""),
-                    "interface": interface_name,
-                    "flaps": flap_count,
-                }
-            )
+            flap_data = {
+                "ip": conn.host,
+                "switchname": await get_switchname(conn),
+                "interface": interface_name,
+                "flaps": flap_count,
+            }
+            if args.include_metadata:
+                flap_data.update(await get_device_metadata(conn))
+            data.append(flap_data)
+    return data
+
+
+async def get_switchname(conn: AsyncNXOSDriver) -> str:
+    """Obtain the name of the switch configured with the "hostname" command.
+
+    Args:
+        conn (AsyncNXOSDriver): Scrapli driver representing the connection to the Nexus switch.
+
+    Returns:
+        str: Name of the switch as configured with the "hostname" global configuration command.
+    """
+    structured_output = await command(conn, "show version", structured=True)
+    return structured_output[0]["hostname"]
+
+
+async def get_device_metadata(conn: AsyncNXOSDriver) -> dict:
+    """Obtain metadata about a switch.
+
+    Obtain the following metadata about a switch:
+
+    * NX-OS Software Version (e.g. 9.3(7a))
+    * Switch Uptime (e.g. 7 day(s), 21 hour(s), 3 minute(s), 49 second(s))
+    * Switch Serial Number (e.g. FOC1234ABCD)
+    * Switch Hardware Model (e.g. N9K-C93180YC-FX)
+
+    Args:
+        conn (AsyncNXOSDriver): Scrapli driver representing the connection to the Nexus switch.
+
+    Returns:
+        dict: Represents metadata about the switch. Sample output is below:
+
+        {
+            "software_version": "9.3(7a)",
+            "uptime": "7 day(s), 21 hour(s), 3 minute(s), 49 second(s)",
+            "serial_number": "FOC1234ABCD",
+            "hardware_model": "N9K-C93180YC-FX3",
+        }
+    """
+    structured_output = await command(conn, "show version", structured=True)
+    data = {
+        "software_version": structured_output[0]["os"],
+        "uptime": structured_output[0]["uptime"],
+        "serial_number": structured_output[0]["serial"],
+    }
+    structured_output = await command(conn, "show module", structured=True)
+    data["hardware_model"] = structured_output[0]["model"]
     return data
 
 
@@ -334,15 +446,60 @@ async def main() -> None:
             for d in switch_data:
                 data += d
             table = PrettyTable()
-            table.field_names = ["IP", "Hostname", "Interface", "Number of Flaps"]
-            table.align["IP"] = "l"
-            table.align["Hostname"] = "l"
-            table.align["Interface"] = "l"
+            if args.include_metadata:
+                table.field_names = [
+                    "IP/FQDN",
+                    "Switch Name",
+                    "Hardware Model",
+                    "Serial Number",
+                    "NX-OS Software Version",
+                    "Switch Uptime",
+                    "Interface",
+                    "Number of Flaps",
+                ]
+                table.align["IP/FQDN"] = "l"
+                table.align["Switch Name"] = "l"
+                table.align["Hardware Model"] = "l"
+                table.align["Serial Number"] = "l"
+                table.align["NX-OS Software Version"] = "l"
+                table.align["Switch Uptime"] = "l"
+                table.align["Interface"] = "l"
+            else:
+                table.field_names = [
+                    "IP/FQDN",
+                    "Switch Name",
+                    "Interface",
+                    "Number of Flaps",
+                ]
+                table.align["IP/FQDN"] = "l"
+                table.align["Switch Name"] = "l"
+                table.align["Interface"] = "l"
             # Iterate through our interface data, sorting it from highest number of flaps to lowest
             # number of flaps.
             for d in sorted(data, key=lambda i: i["flaps"], reverse=True):
                 if d["flaps"] >= args.interface_flap_floor:
-                    table.add_row(d.values())
+                    if args.include_metadata:
+                        table.add_row(
+                            [
+                                d.get("ip"),
+                                d.get("switchname"),
+                                d.get("hardware_model"),
+                                d.get("serial_number"),
+                                d.get("software_version"),
+                                d.get("uptime"),
+                                d.get("interface"),
+                                d.get("flaps"),
+                            ]
+                        )
+                    else:
+                        table.add_row(
+                            [
+                                d.get("ip"),
+                                d.get("switchname"),
+                                d.get("interface"),
+                                d.get("flaps"),
+                            ]
+                        )
             print(table)
     logger.info("Finished analysis in %.2f seconds", time.time() - start_time)
 
