@@ -39,6 +39,10 @@ Optional parameters include:
 * **--verbose** - Increases the verbosity of logging. Informational logs are displayed in the script's output alongside the interface flap report.
 * **--debug** - Increases the verbosity of logging. Debug logs are displayed in the script's output alongside the interface flap report.
 
+## Prerequisites
+
+This script requires Python version 3.8 or higher. Consult your operating system's package manager's manual or the Python documentation to determine how to install Python 3.8 or higher on the host where this script will run.
+
 ## Installation
 
 This script can be installed using the instructions below:
